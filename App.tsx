@@ -113,7 +113,7 @@ function App() {
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 text-terminal-accent font-mono font-bold text-xl">
             <ChevronRight strokeWidth={3} />
-            <span>ghinfo</span>
+            <span>ssinfo</span>
           </div>
           
           <button 

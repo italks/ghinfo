@@ -1,5 +1,5 @@
 {
-  "name": "ghinfo",
+  "name": "ssinfo",
   "description": "A terminal-styled GitHub repository explorer with AI-powered insights.",
   "requestFramePermissions": []
 }
