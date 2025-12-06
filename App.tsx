@@ -1,212 +1,289 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Command, Settings, ChevronRight, Loader2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { searchRepositories, getAuthenticatedUser } from './services/githubService';
-import { GitHubRepo, GitHubUser, SortOption } from './types';
+import { GitHubRepo, GitHubUser } from './types';
 import RepoCard from './components/RepoCard';
 import SettingsModal from './components/SettingsModal';
 
+type LineType = 'input' | 'output' | 'error' | 'component' | 'system';
+
+interface TerminalLine {
+  id: string;
+  type: LineType;
+  content: React.ReactNode;
+  timestamp: number;
+}
+
 function App() {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<GitHubRepo[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-  
+  // Terminal State
+  const [lines, setLines] = useState<TerminalLine[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
   // Auth State
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('gh_token'));
   const [user, setUser] = useState<GitHubUser | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Debounce ref
-  // Changed NodeJS.Timeout to number because we are in a browser environment
-  const searchTimeout = useRef<number | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  // Refs
+  const inputRef = useRef<HTMLInputElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Initial user fetch if token exists
+  // Initial Boot
+  useEffect(() => {
+    addSystemLine(
+      <div className="mb-4">
+        <pre className="text-terminal-accent font-bold leading-tight">
+{`
+   _____ _____ _____ _   _ ______ ____  
+  / ____/ ____|_   _| \\ | |  ____/ __ \\ 
+ | (___| (___   | | |  \\| | |__ | |  | |
+  \\___ \\\\___ \\  | | | . \` |  __|| |  | |
+  ____) |___) |_| |_| |\\  | |   | |__| |
+ |_____/_____/|_____|_| \\_|_|    \\____/ 
+`}
+        </pre>
+        <p className="mt-2 text-terminal-fg">v1.0.0 -- Node.js GitHub Explorer</p>
+        <p className="text-terminal-dim">Type <span className="text-white font-bold">help</span> to see available commands.</p>
+        <p className="text-terminal-dim">Try <span className="text-white font-bold">ssinfo react</span> to search.</p>
+        <div className="w-full h-px bg-terminal-border my-4"></div>
+      </div>
+    );
+  }, []);
+
+  // Auth Effect
   useEffect(() => {
     if (token) {
       getAuthenticatedUser(token)
-        .then(setUser)
+        .then((u) => {
+          setUser(u);
+          addSystemLine(`Logged in as ${u.login}`);
+        })
         .catch(() => {
           setToken(null);
           localStorage.removeItem('gh_token');
+          addErrorLine("Session expired. Please login again.");
         });
-    } else {
-      setUser(null);
     }
   }, [token]);
 
-  const handleSearch = useCallback(async (searchQuery: string) => {
-    if (!searchQuery.trim()) {
-      setResults([]);
-      setSelectedIndex(-1);
-      return;
-    }
+  // Scroll to bottom
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [lines]);
 
-    setLoading(true);
-    setError(null);
-    setSelectedIndex(-1);
+  // Focus Input
+  useEffect(() => {
+    const focusInput = () => inputRef.current?.focus();
+    window.addEventListener('click', focusInput);
+    return () => window.removeEventListener('click', focusInput);
+  }, []);
+
+  const addLine = (type: LineType, content: React.ReactNode) => {
+    setLines(prev => [...prev, {
+      id: Math.random().toString(36).substr(2, 9),
+      type,
+      content,
+      timestamp: Date.now()
+    }]);
+  };
+
+  const addSystemLine = (content: React.ReactNode) => addLine('system', content);
+  const addErrorLine = (content: string) => addLine('error', content);
+
+  const handleCommand = async (cmdString: string) => {
+    const trimmed = cmdString.trim();
+    if (!trimmed) return;
+
+    // Add to input history
+    addLine('input', trimmed);
+    setCommandHistory(prev => [...prev, trimmed]);
+    setHistoryIndex(-1);
+    setInputValue('');
+
+    const parts = trimmed.split(' ');
+    const command = parts[0].toLowerCase();
+    const args = parts.slice(1);
+    const argsString = args.join(' ');
+
+    setIsProcessing(true);
 
     try {
-      const data = await searchRepositories(searchQuery, token);
-      setResults(data.items);
+      switch (command) {
+        case 'help':
+          addSystemLine(
+            <div className="space-y-1 text-terminal-dim">
+              <p><span className="text-terminal-accent font-bold">ssinfo &lt;query&gt;</span>  Search repositories (e.g., 'ssinfo react')</p>
+              <p><span className="text-terminal-accent font-bold">login</span>           Open authentication settings</p>
+              <p><span className="text-terminal-accent font-bold">logout</span>          Clear authentication token</p>
+              <p><span className="text-terminal-accent font-bold">clear</span>           Clear terminal history</p>
+              <p><span className="text-terminal-accent font-bold">whoami</span>          Show current user</p>
+            </div>
+          );
+          break;
+
+        case 'clear':
+          setLines([]);
+          break;
+
+        case 'whoami':
+          if (user) {
+            addSystemLine(`User: ${user.login} (${user.html_url})`);
+          } else {
+            addSystemLine("Not logged in. Guest mode.");
+          }
+          break;
+
+        case 'login':
+          setIsSettingsOpen(true);
+          break;
+
+        case 'logout':
+          setToken(null);
+          setUser(null);
+          localStorage.removeItem('gh_token');
+          addSystemLine("Logged out successfully.");
+          break;
+
+        case 'ssinfo':
+          if (!argsString) {
+            addErrorLine("Usage: ssinfo <query>");
+            break;
+          }
+          await executeSearch(argsString);
+          break;
+
+        default:
+          addErrorLine(`Command not found: ${command}. Type 'help' for available commands.`);
+      }
     } catch (err: any) {
-      setError(err.message || 'An error occurred');
-      setResults([]);
+      addErrorLine(err.message || "An unexpected error occurred.");
     } finally {
-      setLoading(false);
+      setIsProcessing(false);
     }
-  }, [token]);
+  };
 
-  // Debounced Search Effect
-  useEffect(() => {
-    if (searchTimeout.current) clearTimeout(searchTimeout.current);
-
-    searchTimeout.current = window.setTimeout(() => {
-      handleSearch(query);
-    }, 600); // 600ms debounce
-
-    return () => {
-      if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    };
-  }, [query, handleSearch]);
-
-  // Keyboard Navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
+  const executeSearch = async (query: string) => {
+    addSystemLine(<span className="animate-pulse text-yellow-400">Searching GitHub for "{query}"...</span>);
+    
+    try {
+      const data = await searchRepositories(query, token);
+      
+      if (data.items.length === 0) {
+        addSystemLine("No repositories found.");
+      } else {
+        addLine('component', (
+          <div className="mt-2 mb-4">
+             <div className="text-terminal-dim text-xs mb-2">FOUND {data.total_count} RESULTS (Showing Top {data.items.length})</div>
+            {data.items.map((repo, idx) => (
+              <RepoCard key={repo.id} repo={repo} index={idx + 1} />
+            ))}
+          </div>
+        ));
       }
+    } catch (err: any) {
+      throw err;
+    }
+  };
 
-      if (results.length === 0) return;
-
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex(prev => (prev < results.length - 1 ? prev + 1 : prev));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex(prev => (prev > 0 ? prev - 1 : prev));
-      } else if (e.key === 'Enter' && selectedIndex >= 0) {
-        window.open(results[selectedIndex].html_url, '_blank');
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleCommand(inputValue);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (commandHistory.length > 0) {
+        const newIndex = historyIndex === -1 ? commandHistory.length - 1 : Math.max(0, historyIndex - 1);
+        setHistoryIndex(newIndex);
+        setInputValue(commandHistory[newIndex]);
       }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [results, selectedIndex]);
-
-  const saveToken = (newToken: string | null) => {
-    if (newToken) {
-      localStorage.setItem('gh_token', newToken);
-      setToken(newToken);
-    } else {
-      localStorage.removeItem('gh_token');
-      setToken(null);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex !== -1) {
+        const newIndex = Math.min(commandHistory.length - 1, historyIndex + 1);
+        setHistoryIndex(newIndex);
+        setInputValue(commandHistory[newIndex]);
+      } else {
+        setInputValue('');
+      }
+    } else if (e.key === 'l' && e.ctrlKey) {
+      e.preventDefault();
+      setLines([]);
     }
   };
 
   return (
-    <div className="min-h-screen bg-terminal-bg text-terminal-fg font-sans selection:bg-terminal-accent selection:text-slate-900 flex flex-col">
-      {/* Header / Nav */}
-      <header className="border-b border-terminal-border bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
-        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-terminal-accent font-mono font-bold text-xl">
-            <ChevronRight strokeWidth={3} />
-            <span>ssinfo</span>
-          </div>
+    <div className="min-h-screen bg-terminal-bg text-terminal-fg font-mono p-4 md:p-8 selection:bg-terminal-accent selection:text-slate-900 cursor-text" onClick={() => inputRef.current?.focus()}>
+      <div className="max-w-4xl mx-auto">
+        {/* Terminal Output */}
+        <div className="space-y-1">
+          {lines.map((line) => (
+            <div key={line.id} className="break-words">
+              {line.type === 'input' && (
+                <div className="flex items-start gap-2 text-terminal-fg">
+                  <span className="text-terminal-accent shrink-0 font-bold">
+                    {user ? `${user.login}@ssinfo:~$` : 'guest@ssinfo:~$'}
+                  </span>
+                  <span>{line.content}</span>
+                </div>
+              )}
+              {line.type === 'error' && (
+                <div className="text-red-400 flex items-center gap-2">
+                  <AlertCircle size={14} /> {line.content}
+                </div>
+              )}
+              {line.type === 'system' && (
+                <div className="text-terminal-dim">
+                  {line.content}
+                </div>
+              )}
+              {line.type === 'component' && (
+                <div className="w-full">
+                  {line.content}
+                </div>
+              )}
+            </div>
+          ))}
           
-          <button 
-            onClick={() => setIsSettingsOpen(true)}
-            className="flex items-center gap-2 text-sm font-mono text-terminal-dim hover:text-terminal-fg transition-colors"
-          >
-            {user ? (
-              <span className="flex items-center gap-2">
-                <img src={user.avatar_url} className="w-6 h-6 rounded-full border border-terminal-border" alt="" />
-                {user.login}
-              </span>
-            ) : (
-              <span>Guest (Rate Limited)</span>
-            )}
-            <Settings size={18} />
-          </button>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-4xl mx-auto px-4 py-8 w-full flex flex-col">
-        {/* Search Area */}
-        <div className="relative mb-8 group">
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-terminal-accent">
-            <ChevronRight size={20} />
-          </div>
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search repositories..."
-            className="w-full bg-slate-950 border border-terminal-border text-lg py-4 pl-12 pr-16 rounded-xl shadow-lg focus:outline-none focus:border-terminal-accent focus:ring-1 focus:ring-terminal-accent transition-all font-mono"
-            autoFocus
-          />
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-1 text-xs text-terminal-dim border border-terminal-border px-2 py-1 rounded bg-slate-900">
-            <Command size={10} /> <span>K</span>
+          {/* Active Input Line */}
+          <div className="flex items-start gap-2 text-terminal-fg pt-1">
+            <span className="text-terminal-accent shrink-0 font-bold">
+              {user ? `${user.login}@ssinfo:~$` : 'guest@ssinfo:~$'}
+            </span>
+            <div className="relative flex-1">
+              <input
+                ref={inputRef}
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="w-full bg-transparent border-none outline-none p-0 text-terminal-fg font-mono caret-terminal-accent"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={isProcessing}
+              />
+            </div>
+            {isProcessing && <Loader2 className="animate-spin text-terminal-accent" size={16} />}
           </div>
         </div>
 
-        {/* Status Bar */}
-        <div className="flex items-center justify-between mb-4 px-2 text-sm text-terminal-dim font-mono">
-          <span>STATUS: {loading ? <span className="text-yellow-400 animate-pulse">FETCHING...</span> : <span className="text-terminal-accent">READY</span>}</span>
-          <span>{results.length} RESULTS FOUND</span>
-        </div>
+        <div ref={bottomRef} />
+      </div>
 
-        {/* Content Area */}
-        <div className="flex-1">
-          {error ? (
-            <div className="flex flex-col items-center justify-center py-20 text-red-400 border border-red-900/50 bg-red-900/10 rounded-lg">
-              <AlertCircle size={48} className="mb-4 opacity-50" />
-              <p className="font-mono text-lg mb-2">Error Encountered</p>
-              <p className="text-sm opacity-80">{error}</p>
-            </div>
-          ) : results.length > 0 ? (
-            <div className="space-y-1 pb-10">
-              {results.map((repo, idx) => (
-                <RepoCard 
-                  key={repo.id}
-                  repo={repo}
-                  isSelected={idx === selectedIndex}
-                  onSelect={() => setSelectedIndex(idx)}
-                />
-              ))}
-            </div>
-          ) : !loading && query ? (
-            <div className="flex flex-col items-center justify-center py-20 text-terminal-dim">
-              <Search size={48} className="mb-4 opacity-20" />
-              <p className="font-mono">No repositories found.</p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-20 text-terminal-dim opacity-50">
-              <div className="font-mono text-sm space-y-2 text-center">
-                <p>Type to search GitHub...</p>
-                <p className="text-xs">Use <span className="border border-terminal-dim px-1 rounded">↑</span> <span className="border border-terminal-dim px-1 rounded">↓</span> to navigate</p>
-                <p className="text-xs">Press <span className="border border-terminal-dim px-1 rounded">Enter</span> to open</p>
-              </div>
-            </div>
-          )}
-          
-          {loading && (
-            <div className="flex justify-center py-8">
-              <Loader2 className="animate-spin text-terminal-accent" size={32} />
-            </div>
-          )}
-        </div>
-      </main>
-
-      {/* Settings Modal */}
       <SettingsModal 
         isOpen={isSettingsOpen} 
         onClose={() => setIsSettingsOpen(false)} 
         token={token}
-        onSaveToken={saveToken}
+        onSaveToken={(t) => {
+          if (t) {
+            setToken(t);
+            localStorage.setItem('gh_token', t);
+          } else {
+            setToken(null);
+            localStorage.removeItem('gh_token');
+          }
+        }}
         user={user}
       />
     </div>
