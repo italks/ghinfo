@@ -1,6 +1,6 @@
 {
   "name": "ssinfo",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A terminal-styled GitHub repository explorer with AI-powered insights.",
   "main": "index.tsx",
   "type": "module",
