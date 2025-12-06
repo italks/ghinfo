@@ -1,6 +1,6 @@
 {
   "name": "ssinfo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A terminal-styled GitHub repository explorer with AI-powered insights.",
   "main": "index.tsx",
   "type": "module",
@@ -24,6 +24,9 @@
     "@google/genai": "^1.31.0",
     "lucide-react": "^0.556.0",
     "react": "^19.2.1",
-    "react-dom": "^19.2.1"
+    "react-dom": "^19.2.1",
+    "chalk": "^5.3.0",
+    "inquirer": "^9.2.15",
+    "open": "^10.1.0"
   }
 }
